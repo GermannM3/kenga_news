@@ -1,0 +1,8 @@
+aiogram
+aiohttp
+beautifulsoup4
+sqlite3
+feedparser
+python-dotenv
+cachetools
+tenacity
