@@ -32,7 +32,6 @@ async def fetch_news(keyword):
         async with session.get(url) as response:
             return await response.json()
 
-# Функция для публикации новостей
 async def publish_news(bot: Bot):
     """Публикует новости в канал."""
     from bot.database import is_news_published, add_news_to_db
@@ -48,7 +47,17 @@ async def publish_news(bot: Bot):
                 url = article.get("url", "#")
 
                 if not is_news_published(title):
-                    message = f"**{title}**\n\n{description}\n\n[Читать далее]({url})"
+                    # Формируем хэштеги
+                    hashtags = " ".join([f"#{keyword}" for keyword in KEYWORDS])
+
+                    # Формируем сообщение с хэштегами и подписью
+                    message = (
+                        f"**{title}**\n\n"
+                        f"{description}\n\n"
+                        f"[Читать далее]({url})\n\n"
+                        f"{hashtags}\n\n"
+                        "🦘 Подписаться: @keng_news"
+                    )
 
                     # Отправка сообщения с задержкой
                     await bot.send_message(
