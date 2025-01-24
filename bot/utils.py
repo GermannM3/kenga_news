@@ -7,6 +7,7 @@ import logging
 from dotenv import load_dotenv
 import os
 from aiogram import Bot
+import asyncio
 
 # Загружаем переменные окружения из файла .env
 load_dotenv()
@@ -34,7 +35,7 @@ async def fetch_news(keyword):
 # Функция для публикации новостей
 async def publish_news(bot: Bot):
     """Публикует новости в канал."""
-    from bot.database import is_news_published, add_news_to_db  # Импортируем функции для работы с БД
+    from bot.database import is_news_published, add_news_to_db
 
     try:
         for keyword in KEYWORDS:
@@ -46,17 +47,20 @@ async def publish_news(bot: Bot):
                 description = article.get("description", "Без описания")
                 url = article.get("url", "#")
 
-                # Проверяем, была ли новость уже опубликована
                 if not is_news_published(title):
-                    # Формируем сообщение
                     message = f"**{title}**\n\n{description}\n\n[Читать далее]({url})"
 
-                    # Отправляем сообщение в канал
-                    await bot.send_message(chat_id=os.getenv("PUBLICATION_CHANNEL_ID"), text=message)
-
-                    # Добавляем новость в базу данных
+                    # Отправка сообщения с задержкой
+                    await bot.send_message(
+                        chat_id=os.getenv("PUBLICATION_CHANNEL_ID"),
+                        text=message
+                    )
                     add_news_to_db(title)
                     logger.info(f"Новость опубликована: {title}")
+
+                    # Задержка 2 секунды между сообщениями
+                    await asyncio.sleep(2)
+
                 else:
                     logger.info(f"Новость уже опубликована: {title}")
 
