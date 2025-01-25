@@ -30,12 +30,19 @@ dp.include_router(router)
 
 # Основная функция
 async def main():
-    init_db()  # Инициализируем базу данных
-    asyncio.create_task(publish_news(bot))  # Запускаем задачу публикации новостей
-    await dp.start_polling(bot, skip_updates=True)  # Пропускаем старые сообщения
+    from aiogram import Bot, Dispatcher
+    from aiogram.fsm.storage.memory import MemoryStorage
+    from bot.database import init_db
+    from bot.utils import publish_news
 
-# Запуск бота
-if __name__ == '__main__':
+    init_db()
+    bot = Bot(token=os.getenv("API_TOKEN"))
+    await publish_news(bot)  # Запускаем публикацию новостей
+
+# Для запуска из командной строки
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
