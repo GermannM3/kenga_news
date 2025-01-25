@@ -2,11 +2,13 @@ import aiohttp
 from bs4 import BeautifulSoup
 import re
 from cachetools import cached, TTLCache
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import logging
 from dotenv import load_dotenv
 import os
 from aiogram import Bot
+import asyncio
+from aiogram.exceptions import TelegramRetryAfter
 
 # Загружаем переменные окружения из файла .env
 load_dotenv()
@@ -22,7 +24,12 @@ cache = TTLCache(maxsize=100, ttl=600)
 # Ключевые слова для поиска новостей
 KEYWORDS = ["xbox", "AI", "КНДР", "Россия", "экономика", "космос"]
 
-# Функция для получения новостей по ключевым словам
+def clean_text(text):
+    """Очищает текст от символов, которые могут нарушить HTML-разметку."""
+    if not text:
+        return ""
+    return re.sub(r"[\*_\[\]()]", "", text)
+
 @cached(cache)
 async def fetch_news(keyword):
     """Получает новости по ключевому слову."""
@@ -31,10 +38,38 @@ async def fetch_news(keyword):
         async with session.get(url) as response:
             return await response.json()
 
-# Функция для публикации новостей
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(12),
+    retry=retry_if_exception_type(TelegramRetryAfter)
+)
+async def send_news_with_retry(bot: Bot, chat_id: str, message: str, image_url: str = None):
+    """Отправляет новость с повторными попытками при ошибке 429."""
+    try:
+        if image_url:
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=image_url,
+                caption=message,
+                parse_mode="HTML"
+            )
+        else:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode="HTML"
+            )
+    except TelegramRetryAfter as e:
+        logger.warning(f"Превышен лимит отправки. Повтор через {e.retry_after} сек.")
+        await asyncio.sleep(e.retry_after + 2)
+        raise
+    except Exception as e:
+        logger.error(f"Неизвестная ошибка при отправке: {e}")
+        raise
+
 async def publish_news(bot: Bot):
-    """Публикует новости в канал."""
-    from bot.database import is_news_published, add_news_to_db  # Импортируем функции для работы с БД
+    """Публикует новости в канал с регулировкой скорости."""
+    from bot.database import is_news_published, add_news_to_db
 
     try:
         for keyword in KEYWORDS:
@@ -42,23 +77,44 @@ async def publish_news(bot: Bot):
             articles = news_data.get("articles", [])
 
             for article in articles:
-                title = article.get("title", "Без заголовка")
-                description = article.get("description", "Без описания")
+                title = clean_text(article.get("title", "Без заголовка"))
+                description = clean_text(article.get("description", "Без описания"))
                 url = article.get("url", "#")
+                image_url = article.get("urlToImage", "")
 
-                # Проверяем, была ли новость уже опубликована
                 if not is_news_published(title):
-                    # Формируем сообщение
-                    message = f"**{title}**\n\n{description}\n\n[Читать далее]({url})"
+                    relevant_hashtags = [
+                        f"#{k}" for k in KEYWORDS
+                        if k.lower() in title.lower() or k.lower() in description.lower()
+                    ]
+                    hashtags = " ".join(relevant_hashtags) if relevant_hashtags else ""
 
-                    # Отправляем сообщение в канал
-                    await bot.send_message(chat_id=os.getenv("PUBLICATION_CHANNEL_ID"), text=message)
+                    message = (
+                        f"<b>{title}</b>\n\n"
+                        f"{description}\n\n"
+                        f"<a href='{url}'>Читать далее</a>\n\n"
+                        f"{hashtags}\n\n"
+                        "🦘 Подписаться: @keng_news"
+                    )
 
-                    # Добавляем новость в базу данных
+                    await send_news_with_retry(
+                        bot=bot,
+                        chat_id=os.getenv("PUBLICATION_CHANNEL_ID"),
+                        message=message,
+                        image_url=image_url
+                    )
+
                     add_news_to_db(title)
                     logger.info(f"Новость опубликована: {title}")
+
+                    # Базовая задержка между сообщениями
+                    await asyncio.sleep(12)
+
                 else:
                     logger.info(f"Новость уже опубликована: {title}")
 
     except Exception as e:
-        logger.error(f"Ошибка при публикации новостей: {e}")
+        logger.error(f"Критическая ошибка при публикации новостей: {e}")
+    finally:
+        # Закрываем HTTP-сессии
+        await bot.session.close()
