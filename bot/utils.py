@@ -23,6 +23,14 @@ cache = TTLCache(maxsize=100, ttl=600)
 # Ключевые слова для поиска новостей
 KEYWORDS = ["xbox", "AI", "КНДР", "Россия", "экономика", "космос"]
 
+# Очистка текста от символов, которые могут нарушить Markdown
+def clean_text(text):
+    """Очищает текст от символов, которые могут нарушить Markdown."""
+    if not text:
+        return ""
+    # Убираем символы *, _, [, ], (, )
+    return re.sub(r"[\*_\[\]()]", "", text)
+
 # Функция для получения новостей по ключевым словам
 @cached(cache)
 async def fetch_news(keyword):
@@ -42,28 +50,43 @@ async def publish_news(bot: Bot):
             articles = news_data.get("articles", [])
 
             for article in articles:
-                title = article.get("title", "Без заголовка")
-                description = article.get("description", "Без описания")
+                title = clean_text(article.get("title", "Без заголовка"))
+                description = clean_text(article.get("description", "Без описания"))
                 url = article.get("url", "#")
+                image_url = article.get("urlToImage", "")  # URL изображения
 
                 if not is_news_published(title):
-                    # Формируем хэштеги
-                    hashtags = " ".join([f"#{keyword}" for keyword in KEYWORDS])
+                    # Фильтруем хэштеги на основе ключевых слов в заголовке или описании
+                    relevant_hashtags = [
+                        f"#{keyword}" for keyword in KEYWORDS
+                        if keyword.lower() in title.lower() or keyword.lower() in description.lower()
+                    ]
+                    hashtags = " ".join(relevant_hashtags) if relevant_hashtags else ""
 
-                    # Формируем сообщение с хэштегами и подписью
+                    # Формируем сообщение с жирным заголовком, хэштегами, подписью и изображением
                     message = (
-                        f"**{title}**\n\n"
+                        f"<b>{title}</b>\n\n"  # Жирный заголовок
                         f"{description}\n\n"
-                        f"[Читать далее]({url})\n\n"
+                        f"<a href='{url}'>Читать далее</a>\n\n"  # Ссылка
                         f"{hashtags}\n\n"
                         "🦘 Подписаться: @keng_news"
                     )
 
-                    # Отправка сообщения с задержкой
-                    await bot.send_message(
-                        chat_id=os.getenv("PUBLICATION_CHANNEL_ID"),
-                        text=message
-                    )
+                    # Отправка сообщения с изображением (если есть)
+                    if image_url:
+                        await bot.send_photo(
+                            chat_id=os.getenv("PUBLICATION_CHANNEL_ID"),
+                            photo=image_url,
+                            caption=message,
+                            parse_mode="HTML"  # Используем HTML для форматирования
+                        )
+                    else:
+                        await bot.send_message(
+                            chat_id=os.getenv("PUBLICATION_CHANNEL_ID"),
+                            text=message,
+                            parse_mode="HTML"  # Используем HTML для форматирования
+                        )
+
                     add_news_to_db(title)
                     logger.info(f"Новость опубликована: {title}")
 
