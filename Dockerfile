@@ -2,12 +2,12 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Обновляем pip перед установкой зависимостей
-RUN pip install --upgrade pip
+# Обновляем pip и устанавливаем uvicorn глобально
+RUN pip install --upgrade pip && pip install uvicorn
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python", "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
