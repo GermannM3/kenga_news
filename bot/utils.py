@@ -2,91 +2,114 @@ import aiohttp
 from bs4 import BeautifulSoup
 import re
 from cachetools import cached, TTLCache
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import logging
 from dotenv import load_dotenv
 import os
 from aiogram import Bot
 import asyncio
-from aiogram.exceptions import TelegramRetryAfter
+from bot.database import is_news_published, add_news_to_db
 
+# Загрузка переменных окружения
 load_dotenv()
+
 logger = logging.getLogger(__name__)
+
+# API-ключ для News API
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+
+# Кэш на 10 минут для запросов к API
 cache = TTLCache(maxsize=100, ttl=600)
+
+# Ключевые слова для поиска новостей и их соответствующие хэштеги
 KEYWORDS = ["xbox", "AI", "КНДР", "Россия", "экономика", "космос"]
+HASHTAGS = {kw.lower(): f"#{kw.lower()}" for kw in KEYWORDS}
+
+# Кэш для ограничения частоты публикаций (не чаще 1 новости в 30 секунд)
+publish_cache = TTLCache(maxsize=1, ttl=30)
 
 def clean_text(text):
+    """Очищает текст от символов, которые могут нарушить форматирование Markdown или HTML."""
     return re.sub(r"[\*_\[\]()]", "", text) if text else ""
 
 @cached(cache)
 async def fetch_news(keyword):
-    """Запрос к NewsAPI с закрытием сессии"""
-    url = f"https://newsapi.org/v2/everything?q={keyword}&apiKey={NEWS_API_KEY}&language=ru&sortBy=publishedAt&pageSize=5"
+    """Получает последние новости по ключевому слову из News API."""
+    url = (
+        f"https://newsapi.org/v2/everything"
+        f"?q={keyword}&apiKey={NEWS_API_KEY}&language=ru&sortBy=publishedAt&pageSize=5"
+    )
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
-            return await response.json()
-
-@retry(
-    stop=stop_after_attempt(2),
-    wait=wait_fixed(20),
-    retry=retry_if_exception_type(TelegramRetryAfter)
-)
-async def send_news_with_retry(bot: Bot, chat_id: str, message: str, image_url: str = None):
-    """Отправка с увеличенными задержками"""
-    try:
-        if image_url:
-            await bot.send_photo(chat_id, image_url, caption=message, parse_mode="HTML")
-        else:
-            await bot.send_message(chat_id, message, parse_mode="HTML")
-    except TelegramRetryAfter as e:
-        wait_time = e.retry_after + 5  # +5 сек. для надежности
-        logger.warning(f"Лимит! Повтор через {wait_time} сек.")
-        await asyncio.sleep(wait_time)
-        raise
-    except Exception as e:
-        logger.error(f"Ошибка отправки: {e}")
-        raise
-    finally:
-        await bot.session.close()  # Закрываем сессию бота
+            if response.status == 200:
+                return await response.json()
+            logger.error(f"Ошибка при запросе к News API: {response.status}")
+            return {"articles": []}
 
 async def publish_news(bot: Bot):
-    """Публикация с улучшенным управлением ресурсами"""
-    from bot.database import is_news_published, add_news_to_db
-
+    """Публикует новости в Telegram-канал с ограничением частоты публикации."""
     try:
         for keyword in KEYWORDS:
             news_data = await fetch_news(keyword)
             articles = news_data.get("articles", [])
 
             for article in articles:
-                title = clean_text(article.get("title", ""))
-                if not title or is_news_published(title):
+                title = clean_text(article.get("title", "Без заголовка"))
+                description = clean_text(article.get("description", "Без описания"))
+                url = article.get("url", "#")
+                image_url = article.get("urlToImage", "")
+
+                # Проверяем, была ли новость опубликована
+                if is_news_published(title):
+                    logger.info(f"Новость уже опубликована: {title}")
                     continue
 
-                # Формирование сообщения
+                # Генерация хэштегов на основе заголовка и описания
+                relevant_hashtags = [
+                    HASHTAGS[key] for key in HASHTAGS
+                    if key in title.lower() or key in description.lower()
+                ]
+                hashtags = " ".join(relevant_hashtags) if relevant_hashtags else ""
+
+                # Форматирование сообщения
                 message = (
-                    f"<b>{title}</b>\n\n"
-                    f"{clean_text(article.get('description', ''))}\n\n"
-                    f"<a href='{article['url']}'>Читать далее</a>\n\n"
-                    f"{' '.join(f'#{k}' for k in KEYWORDS if k.lower() in title.lower())}\n\n"
-                    "🦘 Подписаться: @keng_news"
+                    f"<b>{title}</b>\n\n"  # Жирный заголовок
+                    f"{description}\n\n"  # Описание
+                    f"<a href='{url}'>Читать далее</a>\n\n"  # Ссылка на новость
+                    f"{hashtags}\n\n"
+                    "🦘 Подписаться: @kenga_news"
                 )
 
-                # Отправка с задержкой
-                await send_news_with_retry(
-                    bot=bot,
-                    chat_id=os.getenv("PUBLICATION_CHANNEL_ID"),
-                    message=message,
-                    image_url=article.get("urlToImage")
-                )
+                # Проверка частоты публикаций
+                if "last_published" in publish_cache:
+                    logger.info("Ожидание интервала перед публикацией следующей новости.")
+                    await asyncio.sleep(30)
 
-                add_news_to_db(title)
-                logger.info(f"Опубликовано: {title}")
-                await asyncio.sleep(25)  # Увеличенная базовая задержка
+                # Публикация новости
+                try:
+                    if image_url:
+                        await bot.send_photo(
+                            chat_id=os.getenv("PUBLICATION_CHANNEL_ID"),
+                            photo=image_url,
+                            caption=message,
+                            parse_mode="HTML"
+                        )
+                    else:
+                        await bot.send_message(
+                            chat_id=os.getenv("PUBLICATION_CHANNEL_ID"),
+                            text=message,
+                            parse_mode="HTML"
+                        )
+                    logger.info(f"Новость опубликована: {title}")
+
+                    # Сохраняем новость в базе данных и обновляем кеш публикации
+                    add_news_to_db(title)
+                    publish_cache["last_published"] = True
+
+                except Exception as e:
+                    logger.error(f"Ошибка при публикации новости: {e}")
+
+                # Интервал между публикациями
+                await asyncio.sleep(30)
 
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
-    finally:
-        if not bot.session.closed:
-            await bot.session.close()
+        logger.error(f"Ошибка в процессе публикации новостей: {e}")
