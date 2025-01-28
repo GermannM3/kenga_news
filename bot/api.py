@@ -4,16 +4,14 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 import asyncio
 import os
-from dotenv import load_dotenv
 import logging
-from bot.database import init_db
+import redis
+from bot.database import init_redis, is_news_published, add_news_to_db
 from bot.utils import publish_news
 from bot.handlers import router
 
-load_dotenv()
-
 app = FastAPI()
-bot = Bot(token=os.getenv("API_TOKEN"))
+bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
 dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(router)
 
@@ -25,9 +23,18 @@ class MessageRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    init_db()
+    # Инициализация Redis
+    redis_client = init_redis()
+    try:
+        redis_client.ping()
+        logger.info("✅ Redis подключен!")
+    except Exception as e:
+        logger.error(f"❌ Ошибка подключения к Redis: {str(e)}")
+        raise
+    
+    # Запуск бота и задачи публикации новостей
     asyncio.create_task(dp.start_polling(bot, skip_updates=True))
-    asyncio.create_task(publish_news(bot))
+    asyncio.create_task(publish_news(bot, redis_client))
 
 @app.post("/send_message")
 async def send_message(request: MessageRequest):
