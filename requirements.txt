@@ -8,3 +8,4 @@ tenacity
 uvicorn
 fastapi
 redis
+python-telegram-bot
