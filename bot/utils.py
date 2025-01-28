@@ -23,7 +23,7 @@ async def fetch_news(keyword):
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             if response.status == 200:
-                return await.response.json()
+                return await response.json()  # Исправлено здесь
             logger.error(f"Ошибка при запросе к API: {response.status}")
             return {"articles": []}
 
