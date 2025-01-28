@@ -1,4 +1,7 @@
 import sqlite3
+import logging
+
+logger = logging.getLogger(__name__)
 
 def init_db():
     """Инициализация базы данных."""
@@ -12,6 +15,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+    logger.info("База данных инициализирована.")
 
 def is_news_published(title):
     """Проверяет, была ли новость уже опубликована."""
@@ -26,6 +30,9 @@ def add_news_to_db(title):
     """Добавляет новость в базу данных."""
     conn = sqlite3.connect('news.db')
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO published_news (title) VALUES (?)', (title,))
-    conn.commit()
+    try:
+        cursor.execute('INSERT INTO published_news (title) VALUES (?)', (title,))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        logger.warning(f"Новость уже существует: {title}")
     conn.close()
