@@ -1,38 +1,29 @@
-import sqlite3
+import redis
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
-def init_db():
-    """Инициализация базы данных."""
-    conn = sqlite3.connect('news.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS published_news (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT UNIQUE
-        )
-    ''')
-    conn.commit()
-    conn.close()
-    logger.info("База данных инициализирована.")
+def init_redis():
+    """Инициализация подключения к Redis"""
+    return redis.Redis(
+        host=os.getenv("REDIS_HOST"),
+        port=int(os.getenv("REDIS_PORT", 6379)),
+        username=os.getenv("REDIS_USER"),
+        password=os.getenv("REDIS_PASSWORD"),
+        ssl=os.getenv("REDIS_SSL", "true").lower() == "true",
+        ssl_cert_reqs=None,
+        decode_responses=True
+    )
 
-def is_news_published(title):
-    """Проверяет, была ли новость уже опубликована."""
-    conn = sqlite3.connect('news.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT title FROM published_news WHERE title = ?', (title,))
-    result = cursor.fetchone()
-    conn.close()
-    return result is not None
+def is_news_published(redis_client, title):
+    """Проверяет, была ли новость уже опубликована"""
+    return redis_client.sismember("published_news", title)
 
-def add_news_to_db(title):
-    """Добавляет новость в базу данных."""
-    conn = sqlite3.connect('news.db')
-    cursor = conn.cursor()
+def add_news_to_db(redis_client, title):
+    """Добавляет новость в Redis"""
     try:
-        cursor.execute('INSERT INTO published_news (title) VALUES (?)', (title,))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        logger.warning(f"Новость уже существует: {title}")
-    conn.close()
+        redis_client.sadd("published_news", title)
+        logger.info(f"Новость добавлена в Redis: {title}")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении в Redis: {str(e)}")
