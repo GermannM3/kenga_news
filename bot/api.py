@@ -9,6 +9,7 @@ import redis
 from bot.database import init_redis, is_news_published, add_news_to_db
 from bot.utils import publish_news
 from bot.handlers import router
+import requests
 
 app = FastAPI()
 bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
@@ -21,6 +22,20 @@ class MessageRequest(BaseModel):
     chat_id: str
     message: str
 
+class TelegramAPI:
+    def __init__(self, token):
+        self.token = token
+        self.base_url = f"https://api.telegram.org/bot{self.token}"
+
+    def send_message(self, chat_id, text):
+        url = f"{self.base_url}/sendMessage"
+        payload = {
+            'chat_id': chat_id,
+            'text': text
+        }
+        response = requests.post(url, json=payload)
+        return response.json()
+
 @app.on_event("startup")
 async def startup_event():
     # Инициализация Redis
@@ -31,6 +46,9 @@ async def startup_event():
     except Exception as e:
         logger.error(f"❌ Ошибка подключения к Redis: {str(e)}")
         raise
+    
+    # Тестовое сообщение
+    await bot.send_message(chat_id=os.getenv("PUBLICATION_CHANNEL_ID"), text="Тестовое сообщение")
     
     # Запуск бота и задачи публикации новостей
     asyncio.create_task(dp.start_polling(bot, skip_updates=True))

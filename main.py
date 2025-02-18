@@ -7,6 +7,8 @@ from bot.handlers import router
 from bot.utils import publish_news
 from dotenv import load_dotenv
 import os
+from bot.api import TelegramAPI
+from bot import bot
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -40,7 +42,8 @@ async def main():
 # Запуск бота
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        # Инициализация и запуск бота
+        bot.run()
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем.")
     except Exception as e:
