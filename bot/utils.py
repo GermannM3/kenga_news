@@ -5,6 +5,7 @@ import os
 from aiogram import Bot
 import asyncio
 from bot.database import is_news_published, add_news_to_db
+from bot.news_parser import get_latest_news
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ async def fetch_news(keyword):
 
 async def publish_news(bot, redis_client):
     try:
-        # Пример получения новостей (замените на ваш код)
+        # Получение новостей
         news = get_latest_news()
         if news:
             for item in news:
