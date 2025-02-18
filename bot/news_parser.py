@@ -1,11 +1,10 @@
 import logging
-from bot.utils import fetch_news  # Импорт функции для получения новостей
 
 logger = logging.getLogger(__name__)
 
-def get_latest_news():
+async def get_latest_news():
     try:
-        # Пример получения новостей
+        from bot.utils import fetch_news  # Ленивый импорт
         news = []
         for keyword in ["AI", "Россия", "экономика"]:  # Пример ключевых слов
             data = await fetch_news(keyword)
